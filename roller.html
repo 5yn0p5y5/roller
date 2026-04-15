@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>roller</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #323437;
+            --main-color: #e2b714;
+            --caret-color: #e2b714;
+            --sub-color: #646669;
+            --text-color: #d1d0c5;
+            --error-color: #ca4754;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'IBM Plex Mono', monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: background-color 0.3s ease;
+        }
+
+        #drop-zone {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            background: var(--bg-color);
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        #drop-zone.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .drop-content {
+            text-align: center;
+            padding: 2rem;
+            border: 2px dashed var(--sub-color);
+            border-radius: 1rem;
+            color: var(--sub-color);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .drop-content:hover {
+            border-color: var(--main-color);
+            color: var(--main-color);
+        }
+
+        .drop-content h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        #reader {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: 2rem;
+        }
+
+        #word-container {
+            font-size: 5rem;
+            font-weight: 400;
+            text-align: center;
+            width: 100%;
+            height: 150px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: default;
+            user-select: none;
+            position: relative;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+
+        .word-wrapper {
+            position: relative;
+            display: flex;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .word-part {
+            white-space: pre;
+        }
+
+        .part-pre {
+            text-align: right;
+            flex: 1;
+        }
+
+        .part-pivot {
+            color: var(--error-color);
+            flex: 0 0 auto;
+            /* The pivot character will be the visual anchor */
+        }
+
+        .part-post {
+            text-align: left;
+            flex: 1;
+        }
+
+        /* Added focus lines for better "zen" focus */
+        #word-container::before,
+        #word-container::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            width: 2px;
+            height: 20px;
+            background: var(--sub-color);
+            transform: translateX(-50%);
+            opacity: 0.3;
+        }
+
+        #word-container::before {
+            top: 0;
+        }
+
+        #word-container::after {
+            bottom: 0;
+        }
+
+        #ui-overlay {
+            position: fixed;
+            bottom: 2rem;
+            left: 0;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            pointer-events: none;
+            opacity: 0.4;
+            transition: opacity 0.3s ease;
+        }
+
+        #ui-overlay:hover {
+            opacity: 1;
+        }
+
+        #progress-bar-container {
+            width: 300px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        #progress-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--main-color);
+            transition: width 0.1s linear;
+        }
+
+        #info {
+            font-size: 0.8rem;
+            color: var(--sub-color);
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        #controls-hint {
+            position: fixed;
+            top: 2rem;
+            font-size: 0.7rem;
+            color: var(--sub-color);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--sub-color);
+            border-top: 3px solid var(--main-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        /* Speed Control Styling */
+        .velocity-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            pointer-events: auto;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: var(--main-color);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <div class="drop-content" id="drop-content">
+            <h1>roller</h1>
+            <p>drag and drop epub or txt or click to browse</p>
+        </div>
+        <div id="loading" style="display: none; flex-direction: column; align-items: center;">
+            <div class="loading-spinner"></div>
+            <p id="loading-text">parsing file...</p>
+        </div>
+    </div>
+
+    <input type="file" id="file-input" accept=".epub,.txt">
+
+    <div id="controls-hint">scroll wheel to roll • space to play • arrows to jump</div>
+
+    <div id="reader">
+        <div id="word-container">Waiting...</div>
+    </div>
+
+    <div id="ui-overlay">
+        <div id="progress-bar-container">
+            <div id="progress-bar"></div>
+        </div>
+        <div id="info">
+            <span id="filename-display"></span>
+            <span id="index-display">0 / 0</span>
+            <div class="velocity-control">
+                <span>velocity</span>
+                <input type="range" id="velocity-slider" min="0.5" max="3" step="0.1" value="1.0">
+                <span id="velocity-display">1.0x</span>
+            </div>
+            <span id="percentage-display">0%</span>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const wordContainer = document.getElementById('word-container');
+        const progressBar = document.getElementById('progress-bar');
+        const filenameDisplay = document.getElementById('filename-display');
+        const indexDisplay = document.getElementById('index-display');
+        const percentageDisplay = document.getElementById('percentage-display');
+        const dropContent = document.getElementById('drop-content');
+        const loadingDiv = document.getElementById('loading');
+        const loadingText = document.getElementById('loading-text');
+
+        const velocitySlider = document.getElementById('velocity-slider');
+        const velocityDisplay = document.getElementById('velocity-display');
+
+        let words = [];
+        let currentIndex = 0;
+        let isPlaying = false;
+        let playTimeout = null;
+        
+        // Multi-scroll/Velocity state
+        let velocity = parseFloat(localStorage.getItem('roller_velocity') || '1.0');
+        let scrollAccumulator = 0;
+        
+        // Calibrated: (40 + 3*20) = 100 units (1 notch) for a 3-letter word
+        const SCROLL_THRESHOLD_BASE = 40; 
+        const SCROLL_THRESHOLD_CHAR = 20; 
+
+        // Initialize Velocity
+        velocitySlider.value = velocity;
+        velocityDisplay.innerText = velocity.toFixed(1) + 'x';
+
+        velocitySlider.addEventListener('input', (e) => {
+            velocity = parseFloat(e.target.value);
+            velocityDisplay.innerText = velocity.toFixed(1) + 'x';
+            localStorage.setItem('roller_velocity', velocity);
+        });
+
+        // --- File Handling ---
+
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('hidden');
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropContent.style.borderColor = 'var(--main-color)';
+            dropContent.style.color = 'var(--main-color)';
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            if (words.length > 0) {
+                dropContent.style.borderColor = 'var(--sub-color)';
+                dropContent.style.color = 'var(--sub-color)';
+            }
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                const name = file.name.toLowerCase();
+                if (name.endsWith('.epub') || name.endsWith('.txt')) {
+                    handleFile(file);
+                } else {
+                    alert('Please drop a valid .epub or .txt file');
+                }
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        // Try to load default book
+        window.addEventListener('load', init);
+
+        async function init() {
+            try {
+                const response = await fetch('prideandprejudice.txt');
+                if (response.ok) {
+                    const text = await response.text();
+                    processText(text, 'prideandprejudice.txt');
+                }
+            } catch (err) {
+                console.log("Default book not loaded (possibly CORS or file missing). Ready for manual drop.");
+                showLoading(false);
+            }
+        }
+
+        async function handleFile(file) {
+            showLoading(true);
+            try {
+                const name = file.name.toLowerCase();
+                let fullText = "";
+
+                if (name.endsWith('.epub')) {
+                    const zip = await JSZip.loadAsync(file);
+                    
+                    const containerFile = await zip.file("META-INF/container.xml").async("string");
+                    const parser = new DOMParser();
+                    const containerXml = parser.parseFromString(containerFile, "text/xml");
+                    const opfPath = containerXml.querySelector("rootfile").getAttribute("full-path");
+                    const opfDir = opfPath.substring(0, opfPath.lastIndexOf("/")) + (opfPath.includes("/") ? "/" : "");
+                    
+                    const opfFile = await zip.file(opfPath).async("string");
+                    const opfXml = parser.parseFromString(opfFile, "text/xml");
+                    
+                    const manifest = {};
+                    opfXml.querySelectorAll("manifest > item").forEach(item => {
+                        manifest[item.getAttribute("id")] = item.getAttribute("href");
+                    });
+                    
+                    const spineIds = Array.from(opfXml.querySelectorAll("spine > itemref")).map(item => item.getAttribute("idref"));
+                    
+                    for (const id of spineIds) {
+                        const href = manifest[id];
+                        const fullHref = opfDir + href;
+                        const contentFile = await zip.file(fullHref).async("string");
+                        const contentDoc = parser.parseFromString(contentFile, "text/html");
+                        
+                        contentDoc.querySelectorAll('script, style').forEach(el => el.remove());
+                        fullText += " " + contentDoc.body.innerText;
+                    }
+                } else if (name.endsWith('.txt')) {
+                    fullText = await file.text();
+                }
+                
+                processText(fullText, file.name);
+            } catch (err) {
+                console.error(err);
+                alert("Failed to parse file: " + err.message);
+                showLoading(false);
+            }
+        }
+
+        function processText(fullText, filename) {
+            words = fullText
+                .replace(/\r\n|\n|\r/g, " ") // replace newlines
+                .split(/\s+/)               // split by whitespace
+                .filter(w => w.length > 0); // remove empty
+            
+            if (words.length === 0) {
+                alert("No text found in file");
+                showLoading(false);
+                return;
+            }
+
+            // Restore position if available
+            const savedIndex = localStorage.getItem('roller_last_index_' + filename);
+            currentIndex = savedIndex ? parseInt(savedIndex) : 0;
+            if (currentIndex >= words.length) currentIndex = 0;
+
+            filenameDisplay.innerText = filename;
+            updateDisplay();
+            
+            dropZone.classList.add('hidden');
+            showLoading(false);
+        }
+
+        function showLoading(show) {
+            if (show) {
+                dropContent.style.display = 'none';
+                loadingDiv.style.display = 'flex';
+            } else {
+                dropContent.style.display = 'block';
+                loadingDiv.style.display = 'none';
+            }
+        }
+
+        // --- Navigation ---
+
+        function updateDisplay() {
+            if (words.length === 0) return;
+
+            const word = words[currentIndex];
+
+            // Calculate pivot (Optimal Recognition Point)
+            const pivotIndex = Math.floor(word.length / 2);
+
+            const pre = word.substring(0, pivotIndex);
+            const pivot = word.substring(pivotIndex, pivotIndex + 1);
+            const post = word.substring(pivotIndex + 1);
+
+            wordContainer.innerHTML = `
+                <div class="word-wrapper">
+                    <span class="word-part part-pre">${pre}</span>
+                    <span class="word-part part-pivot">${pivot}</span>
+                    <span class="word-part part-post">${post}</span>
+                </div>
+            `;
+
+            // Stats
+            const progress = ((currentIndex + 1) / words.length) * 100;
+            progressBar.style.width = `${progress}%`;
+            indexDisplay.innerText = `${currentIndex + 1} / ${words.length}`;
+            percentageDisplay.innerText = `${Math.floor(progress)}%`;
+
+            // Store state
+            localStorage.setItem('roller_last_index_' + filenameDisplay.innerText, currentIndex);
+        }
+
+        // Scroll navigation with Velocity/Accumulator
+        window.addEventListener('wheel', (e) => {
+            if (words.length === 0) return;
+            
+            stopPlayback();
+            
+            const currentWord = words[currentIndex];
+            // Adjust threshold by velocity (higher velocity = less effort)
+            const baseThreshold = SCROLL_THRESHOLD_BASE + (currentWord.length * SCROLL_THRESHOLD_CHAR);
+            const threshold = baseThreshold / velocity;
+            
+            scrollAccumulator += e.deltaY;
+
+            if (scrollAccumulator >= threshold) {
+                if (currentIndex < words.length - 1) {
+                    currentIndex++;
+                    scrollAccumulator = 0;
+                    updateDisplay();
+                }
+            } else if (scrollAccumulator <= -threshold) {
+                if (currentIndex > 0) {
+                    currentIndex--;
+                    scrollAccumulator = 0;
+                    updateDisplay();
+                }
+            }
+        }, { passive: true });
+
+        // Keyboard navigation
+        window.addEventListener('keydown', (e) => {
+            if (words.length === 0) return;
+
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                if (currentIndex < words.length - 1) currentIndex++;
+                stopPlayback();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                if (currentIndex > 0) currentIndex--;
+                stopPlayback();
+            } else if (e.key === ' ') { // Space to toggle play
+                e.preventDefault();
+                togglePlayback();
+            } else if (e.key === 'r') { // Reset
+                currentIndex = 0;
+                stopPlayback();
+            }
+
+            updateDisplay();
+        });
+
+        // --- Playback (RSVP) ---
+
+        function togglePlayback() {
+            if (isPlaying) {
+                stopPlayback();
+            } else {
+                startPlayback();
+            }
+        }
+
+        function startPlayback() {
+            if (currentIndex >= words.length - 1) currentIndex = 0;
+            isPlaying = true;
+            document.body.style.backgroundColor = '#1e1f21'; 
+            
+            playNext();
+        }
+
+        function playNext() {
+            if (!isPlaying) return;
+
+            const currentWord = words[currentIndex];
+            // Adaptive delay scaled by velocity
+            const baseDelay = 100;
+            const msPerChar = 20;
+            const delay = (baseDelay + (currentWord.length * msPerChar)) / velocity;
+
+            playTimeout = setTimeout(() => {
+                if (currentIndex < words.length - 1) {
+                    currentIndex++;
+                    updateDisplay();
+                    playNext();
+                } else {
+                    stopPlayback();
+                }
+            }, delay);
+        }
+
+        function stopPlayback() {
+            isPlaying = false;
+            document.body.style.backgroundColor = 'var(--bg-color)';
+            if (playTimeout) {
+                clearTimeout(playTimeout);
+                playTimeout = null;
+            }
+        }
+
+        // --- Drag & Drop visual feedback ---
+        window.addEventListener('dragenter', () => {
+            dropZone.classList.remove('hidden');
+        });
+    </script>
+</body>
+
+</html>

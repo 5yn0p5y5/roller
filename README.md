@@ -8,6 +8,7 @@ This is a software demo of a piece of hardware I intend to make. The device woul
 - **Velocity-Weighted Scrolling**: Scroll effort is proportional to word length (CPM-based).
 - **Adaptive RSVP**: Auto-play speed scales with word complexity.
 - **Focus Anchor**: Stationary red pivot character for rapid reading.
+- **Chunking**: Group words together to reduce the number of "scrolls" needed to read a sentence.
 - **Zero Setup**: Single-file HTML/JS app that runs anywhere.
 
 ## Controls

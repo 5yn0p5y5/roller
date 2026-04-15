@@ -225,8 +225,8 @@
             display: none;
         }
 
-        /* Speed Control Styling */
-        .velocity-control {
+        /* Control Styling (Sliders & Toggles) */
+        .ui-control {
             display: flex;
             align-items: center;
             gap: 10px;
@@ -255,6 +255,31 @@
 
         input[type="range"]::-webkit-slider-thumb:hover {
             transform: scale(1.2);
+        }
+
+        /* Toggle Button Styling */
+        .toggle-btn {
+            background: none;
+            border: 1px solid var(--sub-color);
+            color: var(--sub-color);
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            transition: all 0.2s ease;
+            pointer-events: auto;
+        }
+
+        .toggle-btn.active {
+            border-color: var(--main-color);
+            color: var(--main-color);
+            background: rgba(226, 183, 20, 0.1);
+        }
+
+        .toggle-btn:hover {
+            border-color: var(--main-color);
         }
     </style>
 </head>
@@ -287,10 +312,15 @@
         <div id="info">
             <span id="filename-display"></span>
             <span id="index-display">0 / 0</span>
-            <div class="velocity-control">
+            <div class="ui-control">
                 <span>velocity</span>
                 <input type="range" id="velocity-slider" min="0.5" max="3" step="0.1" value="1.0">
                 <span id="velocity-display">1.0x</span>
+            </div>
+            <div class="ui-control">
+                <button id="chunk-toggle" class="toggle-btn">chunking</button>
+                <input type="range" id="chunk-slider" min="4" max="25" step="1" value="7">
+                <span id="chunk-display">7 chars</span>
             </div>
             <span id="percentage-display">0%</span>
         </div>
@@ -310,29 +340,64 @@
 
         const velocitySlider = document.getElementById('velocity-slider');
         const velocityDisplay = document.getElementById('velocity-display');
+        const chunkToggle = document.getElementById('chunk-toggle');
+        const chunkSlider = document.getElementById('chunk-slider');
+        const chunkDisplay = document.getElementById('chunk-display');
 
-        let words = [];
+        let rawTokens = [];
+        let words = []; // The active display set (either tokens or chunks)
         let currentIndex = 0;
         let isPlaying = false;
         let playTimeout = null;
         
-        // Multi-scroll/Velocity state
+        // Settings
         let velocity = parseFloat(localStorage.getItem('roller_velocity') || '1.0');
+        let chunkingEnabled = localStorage.getItem('roller_chunking') === 'true';
+        let chunkThreshold = parseInt(localStorage.getItem('roller_chunk_threshold') || '7');
         let scrollAccumulator = 0;
         
         // Calibrated: (40 + 3*20) = 100 units (1 notch) for a 3-letter word
         const SCROLL_THRESHOLD_BASE = 40; 
         const SCROLL_THRESHOLD_CHAR = 20; 
 
-        // Initialize Velocity
+        // Initialize Settings
         velocitySlider.value = velocity;
         velocityDisplay.innerText = velocity.toFixed(1) + 'x';
+        chunkSlider.value = chunkThreshold;
+        chunkDisplay.innerText = chunkThreshold + ' chars';
+        if (chunkingEnabled) chunkToggle.classList.add('active');
 
         velocitySlider.addEventListener('input', (e) => {
             velocity = parseFloat(e.target.value);
             velocityDisplay.innerText = velocity.toFixed(1) + 'x';
             localStorage.setItem('roller_velocity', velocity);
         });
+
+        chunkSlider.addEventListener('input', (e) => {
+            chunkThreshold = parseInt(e.target.value);
+            chunkDisplay.innerText = chunkThreshold + ' chars';
+            localStorage.setItem('roller_chunk_threshold', chunkThreshold);
+            if (chunkingEnabled && rawTokens.length > 0) {
+                triggerRebuild();
+            }
+        });
+
+        chunkToggle.addEventListener('click', () => {
+            chunkingEnabled = !chunkingEnabled;
+            chunkToggle.classList.toggle('active', chunkingEnabled);
+            localStorage.setItem('roller_chunking', chunkingEnabled);
+            if (rawTokens.length > 0) {
+                triggerRebuild();
+            }
+        });
+
+        function triggerRebuild() {
+            const currentText = words[currentIndex] || "";
+            rebuildWords();
+            // Find new index closest to current text (rudimentary)
+            currentIndex = Math.max(0, words.findIndex(w => w.includes(currentText)));
+            updateDisplay();
+        }
 
         // --- File Handling ---
 
@@ -435,16 +500,18 @@
         }
 
         function processText(fullText, filename) {
-            words = fullText
+            rawTokens = fullText
                 .replace(/\r\n|\n|\r/g, " ") // replace newlines
                 .split(/\s+/)               // split by whitespace
                 .filter(w => w.length > 0); // remove empty
             
-            if (words.length === 0) {
+            if (rawTokens.length === 0) {
                 alert("No text found in file");
                 showLoading(false);
                 return;
             }
+
+            rebuildWords();
 
             // Restore position if available
             const savedIndex = localStorage.getItem('roller_last_index_' + filename);
@@ -456,6 +523,34 @@
             
             dropZone.classList.add('hidden');
             showLoading(false);
+        }
+
+        function rebuildWords() {
+            if (!chunkingEnabled) {
+                words = [...rawTokens];
+                return;
+            }
+
+            // Chunking Algorithm
+            const MAX_WORDS = 3;         // Max words per chunk
+            
+            words = [];
+            let currentChunk = "";
+            let wordCount = 0;
+
+            for (let token of rawTokens) {
+                const potential = currentChunk === "" ? token : currentChunk + " " + token;
+                
+                if (potential.length <= chunkThreshold && wordCount < MAX_WORDS) {
+                    currentChunk = potential;
+                    wordCount++;
+                } else {
+                    if (currentChunk !== "") words.push(currentChunk);
+                    currentChunk = token;
+                    wordCount = 1;
+                }
+            }
+            if (currentChunk !== "") words.push(currentChunk);
         }
 
         function showLoading(show) {
@@ -476,7 +571,22 @@
             const word = words[currentIndex];
 
             // Calculate pivot (Optimal Recognition Point)
-            const pivotIndex = Math.floor(word.length / 2);
+            let pivotIndex = Math.floor(word.length / 2);
+
+            // Ensure pivot is not a space (important for chunking)
+            if (word[pivotIndex] === ' ') {
+                // Try to find nearest non-space character (favoring the right)
+                let right = pivotIndex + 1;
+                while (right < word.length && word[right] === ' ') right++;
+                
+                if (right < word.length) {
+                    pivotIndex = right;
+                } else {
+                    let left = pivotIndex - 1;
+                    while (left >= 0 && word[left] === ' ') left--;
+                    if (left >= 0) pivotIndex = left;
+                }
+            }
 
             const pre = word.substring(0, pivotIndex);
             const pivot = word.substring(pivotIndex, pivotIndex + 1);
